@@ -9,10 +9,16 @@ class DynamicPageListUpdateMaintenance extends LoggedUpdateMaintenance {
 		$title = Title::newFromText( 'Template:Extension DPL' );
 
 		if ( !$title->exists() ) {
-			$article = new Article( $title );
-			$article->doEdit(
-			  "<noinclude>This page was automatically created. It serves as an anchor page for all '''[[Special:WhatLinksHere/Template:Extension_DPL|invocations]]''' of [http://mediawiki.org/wiki/Extension:DynamicPageList Extension:DynamicPageList (DPL)].</noinclude>", $title, EDIT_NEW | EDIT_FORCE_BOT
-			);
+
+			$oWikiPage = WikiPage::factory( $title );
+
+			$oContentHandler = $oWikiPage->getContentHandler();
+			$oContent = $oContentHandler->makeContent(
+					"<noinclude>This page was automatically created. It serves as an anchor page for all '''[[Special:WhatLinksHere/Template:Extension_DPL|invocations]]''' of [http://mediawiki.org/wiki/Extension:DynamicPageList Extension:DynamicPageList (DPL)].</noinclude>",
+					$title
+					);
+
+			$oWikiPage->doEditContent( $oContent, $title, EDIT_NEW | EDIT_FORCE_BOT );
 		}
 	}
 
