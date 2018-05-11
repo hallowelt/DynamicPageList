@@ -69,7 +69,7 @@ class Parameters extends ParametersData {
 		if (array_key_exists('permission', $parameterData)) {
 			global $wgUser;
 			if (!$wgUser->isAllowed($parameterData['permission'])) {
-				throw new PermissionsError($parameterData['permission']);
+				throw new \PermissionsError($parameterData['permission']);
 				return;
 			}
 		}
@@ -123,11 +123,23 @@ class Parameters extends ParametersData {
 
 			//Timestamps
 			if (array_key_exists('timestamp', $parameterData) && $parameterData['timestamp'] === true) {
-				$option = str_pad(preg_replace('#[^0-9]#', '', $option), 14, '0');
-				$option = wfTimestamp(TS_MW, $option);
+				$option = strtolower($option);
+				switch ($option) {
+					case 'today':
+					case 'last hour':
+					case 'last day':
+					case 'last week':
+					case 'last month':
+					case 'last year':
+						break;
+					default:
+						$option = str_pad(preg_replace('#[^0-9]#', '', $option), 14, '0');
+						$option = wfTimestamp(TS_MW, $option);
 
-				if ($option === false) {
-					$success = false;
+						if ($option === false) {
+							$success = false;
+						}
+						break;
 				}
 			}
 
@@ -188,7 +200,7 @@ class Parameters extends ParametersData {
 	 * @param	array	Unsorted Parameters
 	 * @return	array	Sorted Parameters
 	 */
-	public function sortByPriority($parameters) {
+	static public function sortByPriority($parameters) {
 		if (!is_array($parameters)) {
 			throw new \MWException(__METHOD__.': A non-array was passed.');
 		}
@@ -199,19 +211,23 @@ class Parameters extends ParametersData {
 			'openreferences'	=> 2,
 			'ignorecase'		=> 3,
 			'category'			=> 4,
-			'goal'				=> 5,
-			'ordercollation'	=> 6,
-			'ordermethod'		=> 7,
-			'includepage'		=> 8,
-			'include'			=> 9
+			'title'				=> 5,
+			'goal'				=> 6,
+			'ordercollation'	=> 7,
+			'ordermethod'		=> 8,
+			'includepage'		=> 9,
+			'include'			=> 10
 		];
-		$_first = array_intersect_key($parameters, $priority);
-		if (count($_first)) {
-			foreach ($_first as $key => $value) {
-				unset($parameters[$key]);
+
+		$_first = [];
+		foreach ($priority as $parameter => $order) {
+			if (isset($parameters[$parameter])) {
+				$_first[$parameter] = $parameters[$parameter];
+				unset($parameters[$parameter]);
 			}
-			$parameters = array_merge($_first, $parameters);
 		}
+		$parameters = $_first + $parameters;
+
 		return $parameters;
 	}
 
@@ -313,7 +329,7 @@ class Parameters extends ParametersData {
 	 * @return	array	Parameter => Options
 	 */
 	public function getAllParameters() {
-		return $this->parameterOptions;
+		return self::sortByPriority($this->parameterOptions);
 	}
 
 	/**
@@ -817,7 +833,6 @@ class Parameters extends ParametersData {
 			$this->setParameter('namespace', $data);
 
 			$this->setParameter('mode', 'userformat');
-			$this->setParameter('ordermethod', []);
 			$this->setSelectionCriteriaFound(true);
 			$this->setOpenReferencesConflict(true);
 			return true;

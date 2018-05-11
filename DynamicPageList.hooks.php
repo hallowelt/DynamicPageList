@@ -39,9 +39,6 @@ class DynamicPageListHooks {
 
 	const FATAL_DOMINANTSECTIONRANGE				= 1010;	// $1: the number of arguments in includepage
 
-	const FATAL_NOCLVIEW							= 1011;	// $1: prefix_dpl_clview where 'prefix' is the prefix of your mediawiki table names
-															// $2: SQL query to create the prefix_dpl_clview on your mediawiki DB
-
 	const FATAL_OPENREFERENCES						= 1012;
 
 	const FATAL_MISSINGPARAMFUNCTION				= 1022;
@@ -114,7 +111,7 @@ class DynamicPageListHooks {
 	 */
 	static public function onRegistration() {
 		if (!defined('DPL_VERSION')) {
-			define('DPL_VERSION', '3.0.12');
+			define('DPL_VERSION', '3.1.3');
 		}
 	}
 
@@ -605,11 +602,38 @@ class DynamicPageListHooks {
 	 * @param	object	[Optional] DatabaseUpdater Object
 	 * @return	boolean	true
 	 */
-	static public function onLoadExtensionSchemaUpdates( $updater ) {
-		//start job after update.php is almost done
-		$updater->addPostDatabaseUpdateMaintenance( 'DynamicPageListUpdateMaintenance' );
+	static public function onLoadExtensionSchemaUpdates(DatabaseUpdater $updater = null) {
+		$extDir = __DIR__;
+
+		$updater->addExtensionUpdate([[__CLASS__, 'createDPLTemplate']]);
+
+		$db = wfGetDB(DB_MASTER);
+		if (!$db->tableExists('dpl_clview')) {
+			$db->query("CREATE VIEW {$db->tablePrefix()}dpl_clview AS SELECT IFNULL(cl_from, page_id) AS cl_from, IFNULL(cl_to, '') AS cl_to, cl_sortkey FROM {$db->tablePrefix()}page LEFT OUTER JOIN {$db->tablePrefix()}categorylinks ON {$db->tablePrefix()}page.page_id=cl_from;");
+		}
+
 		return true;
 	}
 
+	/**
+	 * Creates the DPL template when updating.
+	 *
+	 * @access	public
+	 * @return	void
+	 */
+	static public function createDPLTemplate() {
+		//Make sure page "Template:Extension DPL" exists
+		$title = Title::newFromText('Template:Extension DPL');
+
+		if (!$title->exists()) {
+			$page = WikiPage::factory($title);
+			$pageContent = ContentHandler::makeContent("<noinclude>This page was automatically created. It serves as an anchor page for all '''[[Special:WhatLinksHere/Template:Extension_DPL|invocations]]''' of [http://mediawiki.org/wiki/Extension:DynamicPageList Extension:DynamicPageList (DPL)].</noinclude>", $title);
+			$page->doEditContent(
+				$pageContent,
+				$title,
+				EDIT_NEW | EDIT_FORCE_BOT
+			);
+		}
+	}
 }
 ?>

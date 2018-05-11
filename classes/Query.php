@@ -138,6 +138,13 @@ class Query {
 	private $foundRows = 0;
 
 	/**
+	 * Was the revision auxiliary table select added for firstedit and lastedit?
+	 *
+	 * @var		boolean
+	 */
+	private $revisionAuxWhereAdded = false;
+
+	/**
 	 * Main Constructor
 	 *
 	 * @access	public
@@ -235,9 +242,9 @@ class Query {
 			}
 			if (count($this->orderBy)) {
 				$options['ORDER BY'] = $this->orderBy;
-				$_lastOrder = array_pop($options['ORDER BY']);
-				$_lastOrder .= " ".$this->direction;
-				$options['ORDER BY'][] = $_lastOrder;
+				foreach ($options['ORDER BY'] as $key => $value) {
+					$options['ORDER BY'][$key] .= " ".$this->direction;
+				}
 			}
 		}
 		if ($this->parameters->getParameter('goal') == 'categories') {
@@ -627,6 +634,52 @@ class Query {
 	}
 
 	/**
+	 * Helper method to handle relative timestamps.
+	 *
+	 * @access	private
+	 * @param	mixed	int or string
+	 * @return	integer
+	 */
+	private function convertTimestamp($inputDate) {
+		$timestamp = $inputDate;
+		switch ($inputDate) {
+			case 'today':
+				$timestamp = date('YmdHis');
+				break;
+			case 'last hour':
+				$date = new \DateTime();
+				$date->sub(new \DateInterval('P1H'));
+				$timestamp = $date->format('YmdHis');
+				break;
+			case 'last day':
+				$date = new \DateTime();
+				$date->sub(new \DateInterval('P1D'));
+				$timestamp = $date->format('YmdHis');
+				break;
+			case 'last week':
+				$date = new \DateTime();
+				$date->sub(new \DateInterval('P7D'));
+				$timestamp = $date->format('YmdHis');
+				break;
+			case 'last month':
+				$date = new \DateTime();
+				$date->sub(new \DateInterval('P1M'));
+				$timestamp = $date->format('YmdHis');
+				break;
+			case 'last year':
+				$date = new \DateTime();
+				$date->sub(new \DateInterval('P1Y'));
+				$timestamp = $date->format('YmdHis');
+				break;
+		}
+
+		if (is_numeric($timestamp)) {
+			return $this->DB->addQuotes($timestamp);
+		}
+		return 0;
+	}
+
+	/**
 	 * Set SQL for 'addauthor' parameter.
 	 *
 	 * @access	private
@@ -635,7 +688,7 @@ class Query {
 	 */
 	private function _addauthor($option) {
 		//Addauthor can not be used with addlasteditor.
-		if (!$this->parametersProcessed['addlasteditor']) {
+		if (!isset($this->parametersProcessed['addlasteditor']) || !$this->parametersProcessed['addlasteditor']) {
 			$this->addTable('revision', 'rev');
 			$this->addWhere(
 				[
@@ -695,6 +748,23 @@ class Query {
 	}
 
 	/**
+	 * Set SQL for 'addeditdate' parameter.
+	 *
+	 * @access	private
+	 * @param	mixed	Parameter Option
+	 * @return	void
+	 */
+	private function _addeditdate($option) {
+		$this->addTable('revision', 'rev');
+		$this->addSelect(['rev.rev_timestamp']);
+		$this->addWhere(
+			[
+				$this->tableNames['page'].'.page_id = rev.rev_page',
+			]
+		);
+	}
+
+	/**
 	 * Set SQL for 'addfirstcategorydate' parameter.
 	 *
 	 * @access	private
@@ -719,8 +789,7 @@ class Query {
 	 */
 	private function _addlasteditor($option) {
 		//Addlasteditor can not be used with addauthor.
-		if ( !isset($this->parametersProcessed['addauthor'])
-			 || !$this->parametersProcessed['addauthor'] ) {
+		if (!isset($this->parametersProcessed['addauthor']) || !$this->parametersProcessed['addauthor']) {
 			$this->addTable('revision', 'rev');
 			$this->addWhere(
 				[
@@ -828,7 +897,7 @@ class Query {
 		$this->addWhere(
 			[
 				$this->tableNames['page'].'.page_id = rev.rev_page',
-				'rev.rev_timestamp < '.$this->DB->addQuotes($option)
+				'rev.rev_timestamp < '.$this->convertTimestamp($option)
 			]
 		);
 	}
@@ -853,7 +922,7 @@ class Query {
 		$this->addWhere(
 			[
 				$this->tableNames['page'].'.page_id = rev.rev_page',
-				'rev.rev_timestamp >= '.$this->DB->addQuotes($option)
+				'rev.rev_timestamp >= '.$this->convertTimestamp($option)
 			]
 		);
 	}
@@ -1018,10 +1087,17 @@ class Query {
 				'rev.rev_timestamp'
 			]
 		);
+		// tell the query optimizer not to look at rows that the following subquery will filter out anyway
 		$this->addWhere(
 			[
 				$this->tableNames['page'].'.page_id = rev.rev_page',
-				'rev.rev_timestamp = (SELECT MIN(rev_aux_snc.rev_timestamp) FROM '.$this->tableNames['revision'].' AS rev_aux_snc WHERE rev_aux_snc.rev_page=rev.rev_page AND rev_aux_snc.rev_timestamp >= '.$this->DB->addQuotes($option).')'
+				'rev.rev_timestamp >= '.$this->DB->addQuotes($option)
+			]
+		);
+		$this->addWhere(
+			[
+				$this->tableNames['page'].'.page_id = rev.rev_page',
+				'rev.rev_timestamp = (SELECT MIN(rev_aux_snc.rev_timestamp) FROM '.$this->tableNames['revision'].' AS rev_aux_snc WHERE rev_aux_snc.rev_page=rev.rev_page AND rev_aux_snc.rev_timestamp >= '.$this->convertTimestamp($option).')'
 			]
 		);
 	}
@@ -1138,10 +1214,17 @@ class Query {
 	private function _lastrevisionbefore($option) {
 		$this->addTable('revision', 'rev');
 		$this->addSelect(['rev.rev_id', 'rev.rev_timestamp']);
+		// tell the query optimizer not to look at rows that the following subquery will filter out anyway
 		$this->addWhere(
 			[
 				$this->tableNames['page'].'.page_id = rev.rev_page',
-				'rev.rev_timestamp = (SELECT MAX(rev_aux_bef.rev_timestamp) FROM '.$this->tableNames['revision'].' AS rev_aux_bef WHERE rev_aux_bef.rev_page=rev.rev_page AND rev_aux_bef.rev_timestamp < '.$this->DB->addQuotes($option).')'
+				'rev.rev_timestamp < '.$this->convertTimestamp($option)
+			]
+		);
+		$this->addWhere(
+			[
+				$this->tableNames['page'].'.page_id = rev.rev_page',
+				'rev.rev_timestamp = (SELECT MAX(rev_aux_bef.rev_timestamp) FROM '.$this->tableNames['revision'].' AS rev_aux_bef WHERE rev_aux_bef.rev_page=rev.rev_page AND rev_aux_bef.rev_timestamp < '.$this->convertTimestamp($option).')'
 			]
 		);
 	}
@@ -1516,7 +1599,7 @@ class Query {
 	private function _order($option) {
 		$orderMethod = $this->parameters->getParameter('ordermethod');
 		if (!empty($orderMethod) && is_array($orderMethod) && $orderMethod[0] !== 'none') {
-			if ($option == 'descending') {
+			if ($option === 'descending' || $option === 'desc') {
 				$this->setOrderDir('DESC');
 			} else {
 				$this->setOrderDir('ASC');
@@ -1572,7 +1655,7 @@ class Query {
 		}
 		$_namespaceIdToText .= ' END';
 
-		$revisionAuxWhereAdded = false;
+		$option = (array)$option;
 		foreach ($option as $orderMethod) {
 			switch ($orderMethod) {
 				case 'category':
@@ -1640,7 +1723,7 @@ class Query {
 							'rev.rev_timestamp'
 						]
 					);
-					if (!$revisionAuxWhereAdded) {
+					if (!$this->revisionAuxWhereAdded) {
 						$this->addWhere(
 							[
 								"{$this->tableNames['page']}.page_id = rev.rev_page",
@@ -1648,7 +1731,7 @@ class Query {
 							]
 						);
 					}
-					$revisionAuxWhereAdded = true;
+					$this->revisionAuxWhereAdded = true;
 					break;
 				case 'lastedit':
 					if (\DynamicPageListHooks::isLikeIntersection()) {
@@ -1662,7 +1745,7 @@ class Query {
 						$this->addOrderBy('rev.rev_timestamp');
 						$this->addTable('revision', 'rev');
 						$this->addSelect(['rev.rev_timestamp']);
-						if (!$revisionAuxWhereAdded) {
+						if (!$this->revisionAuxWhereAdded) {
 							$this->addWhere(
 								[
 									"{$this->tableNames['page']}.page_id = rev.rev_page",
@@ -1670,7 +1753,7 @@ class Query {
 								]
 							);
 						}
-						$revisionAuxWhereAdded = true;
+						$this->revisionAuxWhereAdded = true;
 					}
 					break;
 				case 'pagesel':
@@ -1886,6 +1969,7 @@ class Query {
 		}
 		$where = '('.implode(' OR ', $ors).')';
 		$this->addWhere($where);
+		$this->revisionAuxWhereAdded = true;
 	}
 
 	/**
